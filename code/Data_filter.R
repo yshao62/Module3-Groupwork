@@ -3,6 +3,13 @@ library(jsonlite)
 setwd("C:/Users/adin/Desktop/stat628/Module3/git")
 business <- jsonlite::stream_in(file("../../business.json"),pagesize = 100)
 review=jsonlite::stream_in(file("data/review.json"),pagesize = 10000)
+review_information=review[c("user_id","stars")]
+write.csv(review_information,"review_stars.csv",row.names = FALSE)
+user=jsonlite::stream_in(file("../data/user.json"),pagesize = 10000)
+
+#find important user
+biguser=user[user["fans"]>0,c(1,2,3,5,6,7,10,11)]
+write.csv(biguser,"important_user0.csv",row.names = FALSE)
 
 library(jiebaR)   
 library(stringr) 

@@ -1,6 +1,4 @@
 library(jiebaR)   
-library(stringr)
-library(jiebaR)   
 library(stringr) 
 library(text2vec) 
 library(ggplot2)
@@ -8,13 +6,20 @@ library(dplyr)
 
 ##load dataset
 BreakfastData=read.table("BreakfastData.tsv",sep = "\t",header=T)
-Breakfast_review=read.csv("../../Breakfast_review.csv",header=T)
+Breakfast_review=read.csv("Breakfast_review.csv",header=T,encoding = "UTF-8")
+review_information=read.csv("review_stars.csv",header=T)
+user_important=read.csv("important_user0.csv",header=T)
+
+#get important review
+review_important=review_information[which(review_information$user_id %in% user_important$user_id),]
+#get important breakfast review
+Breakfast_review_important=Breakfast_review[which(Breakfast_review$user_id %in% user_important$user_id),]
 
 
 ##use jiebaR library
 ##itoken
 tok_fun = word_tokenizer   
-it_train = itoken(Breakfast_review$text, 
+it_train = itoken(Breakfast_review_important$text, 
                   tokenizer = tok_fun, 
                   progressbar = FALSE)
 ##create_vocabulary
@@ -33,11 +38,9 @@ pruned_vocab_sort=pruned_vocab[order(pruned_vocab[,3],decreasing = T),]
 rownames(pruned_vocab_sort)=1:nrow(pruned_vocab_sort)
 
 #choose key words
-pruned_vocab_key=pruned_vocab_sort[c(6,9,14,17,22,27,29,31,32,42,45,47,57,66,67,71,72,73,76,81,82,83,88,
-                                     101,123,124,127,128,133,140,151,154,159,161,165,173,180,181,183,188,
-                                     207,209,213,223,230,236,239,240,242,254,263,264,265,276,282,
-                                     289,295,296,297,301,305,316,325,339,342,346,347,348,356,361,363,368,
-                                     382,393,399,400,407,410,416,429,451,452,453,459,482,484,485,486,488),]
+pruned_vocab_key=pruned_vocab_sort[c(2,10,21,23,28,29,32,38,42,49,51,53,55,60,62,65,71,72,73,77,83,109,113,114,131,132,134,138,156,168,172,197,198,200,
+                                     6,15,18,22,47,78,84,97,135,160,164,186,
+                                     111,124),]
 
 ##form word frequency matrix
 vectorizer=vocab_vectorizer(pruned_vocab_key)
@@ -46,44 +49,45 @@ dtm_train=as.matrix(dtm_train)
 dtm_train=as.data.frame(dtm_train)
 
 ##stem words
-dtm_train["biscuit"]=dtm_train["biscuit"]+dtm_train["biscuits"]
-dtm_train["burger"]=dtm_train["burger"]+dtm_train["burgers"]
-dtm_train["cafe"]=dtm_train["cafe"]+dtm_train["Cafe"]
-dtm_train["cafe"]=dtm_train["cafe"]+dtm_train["Coffee"]
-dtm_train["cafe"]=dtm_train["cafe"]+dtm_train["coffee"]
-dtm_train["chicken"]=dtm_train["chicken"]+dtm_train["Chicken"]
-dtm_train["drink"]=dtm_train["drink"]+dtm_train["drinks"]
-dtm_train["egg"]=dtm_train["egg"]+dtm_train["eggs"]+dtm_train["Eggs"]
-dtm_train["fried"]=dtm_train["fried"]+dtm_train["fries"]
-dtm_train["omelette"]=dtm_train["omelette"]+dtm_train["omelet"]
-dtm_train["potato"]=dtm_train["potato"]+dtm_train["potatoes"]
-dtm_train["salad"]=dtm_train["salad"]+dtm_train["salads"]
-dtm_train["sandwich"]=dtm_train["sandwich"]+dtm_train["sandwiches"]
-dtm_train["service"]=dtm_train["service"]+dtm_train["Service"]
-dtm_train["waffle"]=dtm_train["waffle"]+dtm_train["waffles"]
-dtm_train["wait"]=dtm_train["wait"]+dtm_train["waited"]+dtm_train["waiting"]
-dtm=select(dtm_train,-c(biscuits,burgers,Cafe,Coffee,coffee,Chicken,drinks,eggs,Eggs,fries,omelet
-                      ,potatoes,salads,sandwiches,Service,waffles,waited,waiting))
-dtm[dtm>0]=1
+dtm_train["food_related"]=apply(dtm_train[,c(1:34)],1,sum)
+dtm_train["service_related"]=apply(dtm_train[,c(35:46)],1,sum)
+dtm_train["price_related"]=apply(dtm_train[,c(47:48)],1,sum)
+dtm_train[dtm_train>0]=1
+
+dtm=select(dtm_train,c("food_related","service_related","price_related"))
+
+##get users' historical rating information
+means=aggregate(review_important$stars,by=list(type=review_important$user_id),mean)
+vars=aggregate(review_important$stars,by=list(type=review_important$user_id),var)
+
+user_star=cbind(means,vars)
+user_star[is.na(user_star)]=0
+user_star=as.data.frame(user_star)
+colnames(user_star)=c("user_id","mean","user_id","var")
+user_star$var=user_star$var+0.001
+
+##get adjust stars
+Breakfast_review_important["ind"] = match(t(Breakfast_review_important["user_id"]), t(user_star["user_id"]))
+Breakfast_review_important["stars_adjust"]=(Breakfast_review_important["stars"]-user_star[Breakfast_review_important$ind,2])/sqrt(user_star[Breakfast_review_important$ind,4])
+
 ##add stars feature
-dtm["stars"]=Breakfast_review["stars"]
-dtm=dtm[grepl("^[[:digit:]]+$",dtm$stars),]
+dtm["stars"]=Breakfast_review_important["stars"]
+dtm["stars_adjust"]=Breakfast_review_important["stars_adjust"]
+dtm["business_id"]=Breakfast_review_important["business_id"]
+
+#scale_score=function(x){
+#  if(x< -0.75){y=1}
+#  else if(x>=-0.75&x< -0.25){y=2}
+#  else if(x>=-0.25&x<0.25){y=3}
+#  else if(x>=0.25&x<0.75){y=4}
+#  else{y=5}
+#  return(y)
+#}
+
+#dtm["stars_scale2"]=apply(dtm['stars_adjust'],1,scale_score)
+
+#write.csv(dtm_train,"dtm.csv",row.names=FALSE)
 
 
-colnames(dtm)
-for(i in colnames(dtm)[1]){
-  keyword_stars=dtm[dtm[i]==1,c(i,"stars")]
-  ggplot(keyword_stars)+
-    geom_bar(aes(x=stars),stat = "count", width=0.9, position="stack")
-}
 
-
-ggplot(keyword_stars)+
-  geom_bar(aes(x=stars),stat = "count", width=0.9, position="stack")
-
-
-
-
-
-write.csv(dtm,"dtm.csv",row.names=FALSE)
 
